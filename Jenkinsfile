@@ -1,108 +1,89 @@
 pipeline {
     agent any
 
-    options {
-        timestamps()
-        disableConcurrentBuilds()
-    }
-
     environment {
-        REGISTRY = 'docker.io'
-        IMAGE_NAME = 'anil40/react-chatbot'
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        FULL_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-        LATEST_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:latest"
-        CONTAINER_NAME = 'react-chatbot'
-        LOCAL_TEST_PORT = '8080'
-        EC2_HOST = '13.60.173.26'
-        EC2_USER = 'ubuntu'
-        EC2_APP_PORT = '80'
+        DOCKERHUB_USER  = "anil40"
+        IMAGE_NAME      = "${DOCKERHUB_USER}/react-chatbot"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+        CONTAINER_NAME  = "react-chatbot"
+        EC2_HOST        = "13.60.173.26"
+        EC2_USER        = "ubuntu"
+        EC2_APP_PORT    = "80"
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
 
-        stage('Install And Build Frontend') {
+        stage('Clone Repository') {
             steps {
-                sh 'npm ci'
-                sh 'npm run build'
+                echo '📥 Cloning repo...'
+                checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $FULL_IMAGE -t $LATEST_IMAGE .'
+                echo '🐳 Building Docker image...'
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} -t ${IMAGE_NAME}:latest ."
             }
         }
 
         stage('Health Validation') {
             steps {
+                echo '🏥 Running health check...'
                 sh '''
-                    set -eu
-                    docker rm -f chatbot-smoke >/dev/null 2>&1 || true
-                    docker run -d --name chatbot-smoke -p ${LOCAL_TEST_PORT}:80 $FULL_IMAGE
-
-                    for attempt in $(seq 1 15); do
-                      if curl -fsS http://127.0.0.1:${LOCAL_TEST_PORT}/healthz >/dev/null; then
-                        echo "Container health check passed."
-                        exit 0
-                      fi
-                      sleep 2
-                    done
-
-                    echo "Health check failed."
-                    docker logs chatbot-smoke || true
-                    exit 1
+                    docker run -d --name health-test -p 8090:80 ${IMAGE_NAME}:latest
+                    sleep 8
+                    RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8090/healthz)
+                    docker stop health-test && docker rm health-test
+                    if [ "$RESPONSE" = "200" ]; then
+                        echo "✅ Health check PASSED"
+                    else
+                        echo "❌ Health check FAILED: HTTP $RESPONSE"
+                        exit 1
+                    fi
                 '''
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Push to Docker Hub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
-                    sh '''
-                        set -eu
-                        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-                        docker push $FULL_IMAGE
-                        docker push $LATEST_IMAGE
-                    '''
+                echo '📤 Pushing to Docker Hub...'
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker push ${IMAGE_NAME}:latest"
                 }
             }
         }
 
-        stage('Deploy To EC2') {
+        stage('Deploy to EC2') {
             steps {
-                sshagent(credentials: ['ec2-ssh-key']) {
-                    sh '''
-                        set -eu
-                        ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} "
-                            docker pull ${LATEST_IMAGE} &&
-                            docker rm -f ${CONTAINER_NAME} >/dev/null 2>&1 || true &&
-                            docker run -d \
-                              --name ${CONTAINER_NAME} \
-                              --restart unless-stopped \
-                              -p ${EC2_APP_PORT}:80 \
-                              ${LATEST_IMAGE}
-                        "
-                    '''
-                }
+                echo '🚀 Deploying container...'
+                sh '''
+                    docker stop ${CONTAINER_NAME} || true
+                    docker rm ${CONTAINER_NAME} || true
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart always \
+                        -p ${EC2_APP_PORT}:80 \
+                        ${IMAGE_NAME}:latest
+                    echo "✅ Deployed!"
+                    docker ps | grep ${CONTAINER_NAME}
+                '''
             }
         }
     }
 
     post {
-        always {
-            sh '''
-                docker rm -f chatbot-smoke >/dev/null 2>&1 || true
-                docker logout >/dev/null 2>&1 || true
-            '''
-        }
         success {
-            echo "Deployment completed successfully."
+            echo '🎉 Pipeline complete! App is live.'
+        }
+        failure {
+            echo '💥 Pipeline failed. Check logs.'
         }
     }
 }
