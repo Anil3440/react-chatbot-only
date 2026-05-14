@@ -8,14 +8,14 @@ pipeline {
 
     environment {
         REGISTRY = 'docker.io'
-        IMAGE_NAME = 'your-dockerhub-username/react-chatbot'
+        IMAGE_NAME = 'Anil40/react-chatbot'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         FULL_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
         LATEST_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:latest"
         CONTAINER_NAME = 'react-chatbot'
         LOCAL_TEST_PORT = '8080'
-        EC2_HOST = 'your-ec2-public-dns'
-        EC2_USER = 'ec2-user'
+        EC2_HOST = '13.60.173.26'
+        EC2_USER = 'ubuntu'
         EC2_APP_PORT = '80'
     }
 
