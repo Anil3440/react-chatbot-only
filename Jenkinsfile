@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         REGISTRY = 'docker.io'
-        IMAGE_NAME = 'Anil40/react-chatbot'
+        IMAGE_NAME = 'anil40/react-chatbot'
         IMAGE_TAG = "${env.BUILD_NUMBER}"
         FULL_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
         LATEST_IMAGE = "${env.REGISTRY}/${env.IMAGE_NAME}:latest"
